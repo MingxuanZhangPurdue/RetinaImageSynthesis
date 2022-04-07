@@ -5,6 +5,8 @@ __pycache__/
 
 .DS_Store
 data/
+models/aae/images/
+models/aae/saved_models/
 
 # C extensions
 *.so
