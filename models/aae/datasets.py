@@ -21,7 +21,7 @@ class ImageDataset(Dataset):
 
     def __getitem__(self, index):
 
-        img_A = Image.open(self.A_files[index % len(self.A_files)]).convert(mode='RGB')
+        img_A = Image.open(self.A_files[index % len(self.A_files)])
         
         if self.transforms_A != None:
             img_A = self.transforms_A(img_A)

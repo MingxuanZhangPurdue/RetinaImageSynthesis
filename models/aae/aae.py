@@ -6,7 +6,7 @@ import torch.nn.functional as f
 Tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
 def reparameterization(mu, logvar):
-    std = torch.exp(logvar / 2)
+    std = torch.exp(logvar/2)
     sampled_z = torch.randn(mu.shape).type(Tensor)
     z = sampled_z*std + mu
     return z
@@ -63,8 +63,31 @@ class ConvTransposeBlock(nn.Module):
             
     def forward(self, x):
         return self.convtransposeblock(x)
+    
 
+class UpsampleConvBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, k=3, s=1, p=1, dropout_p=0):
+        
+        super(UpsampleConvBlock, self).__init__()
+        
+        if dropout_p == 0:
+            self.convtransposeblock = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(in_ch, out_ch, k, s, p),
+            nn.BatchNorm2d(out_ch),
+            nn.LeakyReLU(0.2, inplace=True),
+            )
+        else:
+            self.convtransposeblock = nn.Sequential(
+            nn.Upsample(scale_factor=2, mode='nearest'),
+            nn.Conv2d(in_ch, out_ch, k, s, p),
+            nn.BatchNorm2d(out_ch),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Dropout(dropout_p),
+            )
             
+    def forward(self, x):
+        return self.convtransposeblock(x)            
         
 class Encoder(nn.Module):
     def __init__(self, in_ch, nf, latent_dim):
@@ -72,12 +95,19 @@ class Encoder(nn.Module):
 
         self.model = nn.Sequential(
             ConvBlock(in_ch, nf),
+            
             ConvBlock(nf, nf*2),
+            
             ConvBlock(nf*2, nf*4),
+            
             ConvBlock(nf*4, nf*8),
+            
             ConvBlock(nf*8, nf*8),
+            
             ConvBlock(nf*8, nf*8),
-            ConvBlock(nf*8, nf*8),
+            
+            ConvBlock(nf*8, nf*8, k=2, s=1, p=0),
+            
             nn.Flatten()
         )
 
@@ -100,16 +130,54 @@ class Decoder(nn.Module):
         
         self.linear = nn.Linear(latent_dim, nf*8)
         self.nf = nf
+        
         self.model = nn.Sequential(
-            ConvTransposeBlock(nf*8, nf*8),
-            ConvTransposeBlock(nf*8, nf*8),
-            ConvTransposeBlock(nf*8, nf*8),
-            ConvTransposeBlock(nf*8, nf*4),
-            ConvTransposeBlock(nf*4, nf*2),
-            ConvTransposeBlock(nf*2, nf),
-            ConvTransposeBlock(nf, out_ch),
-            nn.Sigmoid()
+            
+            ConvTransposeBlock(nf*8, nf*8), #2x2
+            
+            ConvTransposeBlock(nf*8, nf*8), #4x4
+            
+            ConvTransposeBlock(nf*8, nf*8), #8x8
+            
+            ConvTransposeBlock(nf*8, nf*8), #16x16
+            
+            ConvTransposeBlock(nf*8, nf*4), #32x32,
+            
+            ConvTransposeBlock(nf*4, nf*2), #64x64
+            
+            ConvTransposeBlock(nf*2, nf), #128x128
+            
+            nn.Conv2d(nf, out_ch, kernel_size=1, stride=1, padding=0),
+            
+            nn.Sigmoid(),
         )
+        
+        
+        
+        """
+        self.model = nn.Sequential(
+            UpsampleConvBlock(nf*8, nf*8), #2x2
+            
+            UpsampleConvBlock(nf*8, nf*8, dropout_p=0.5), #4x4
+            
+            UpsampleConvBlock(nf*8, nf*8, dropout_p=0.5), #8x8
+            
+            UpsampleConvBlock(nf*8, nf*8, dropout_p=0.5), #16x16
+            
+            UpsampleConvBlock(nf*8, nf*4), #32x32
+            ConvBlock(nf*4, nf*4, s=1),
+            
+            UpsampleConvBlock(nf*4, nf*2), #64x64
+            ConvBlock(nf*2, nf*2, s=1),
+            
+            UpsampleConvBlock(nf*2, nf), #128x128
+            ConvBlock(nf, nf, s=1),
+            
+            nn.Conv2d(nf, out_ch, kernel_size=1, stride=1, padding=0),
+            
+            nn.Sigmoid(),
+        )
+        """
 
     def forward(self, z):
         
@@ -120,15 +188,13 @@ class Decoder(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, latent_dim):
+    def __init__(self, latent_dim, nf):
         super(Discriminator, self).__init__()
 
         self.model = nn.Sequential(
-            nn.Linear(latent_dim, 512),
+            nn.Linear(latent_dim, nf),
             nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Linear(256, 1),
+            nn.Linear(nf, 1),
             nn.Sigmoid(),
         )
 

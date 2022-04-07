@@ -26,17 +26,18 @@ import torch
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--n_epochs", type=int, default=200, help="number of epochs of training")
+parser.add_argument("--epoch", type=int, default=0, help="epoch to start training from")
+parser.add_argument("--n_epochs", type=int, default=400, help="number of epochs of training")
 parser.add_argument("--exp_name", type=str, default="vessel", help="name of the experiment")
-parser.add_argument("--batch_size", type=int, default=32, help="size of the batches")
+parser.add_argument("--batch_size", type=int, default=16, help="size of the batches")
 parser.add_argument("--nf", type=int, default=32, help="number of filters")
-parser.add_argument("--lr", type=float, default=0.002, help="adam: learning rate")
+parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
 parser.add_argument("--b1", type=float, default=0.5, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--b2", type=float, default=0.999, help="adam: decay of first order momentum of gradient")
 parser.add_argument("--latent_dim", type=int, default=16, help="dimensionality of the latent code")
 parser.add_argument("--img_size", type=int, default=128, help="size of each image dimension")
-parser.add_argument("--channels", type=int, default=3, help="number of image channels")
-parser.add_argument("--checkpoint_interval", type=int, default=10, help="interval between saving model checkpoints")
+parser.add_argument("--channels", type=int, default=1, help="number of image channels")
+parser.add_argument("--checkpoint_interval", type=int, default=20, help="interval between saving model checkpoints")
 parser.add_argument("--sample_interval", type=int, default=400, help="interval saving generator samples")
 opt = parser.parse_args()
 
@@ -54,7 +55,15 @@ pixelwise_loss = torch.nn.L1Loss()
 # Initialize generator and discriminator
 encoder = Encoder(in_ch=opt.channels, nf=opt.nf, latent_dim=opt.latent_dim)
 decoder = Decoder(out_ch=opt.channels, nf=opt.nf, latent_dim=opt.latent_dim)
-discriminator = Discriminator(latent_dim=opt.latent_dim)
+discriminator = Discriminator(latent_dim=opt.latent_dim, nf=opt.nf)
+
+
+if opt.epoch != 0:
+    # Load pretrained models
+    encoder.load_state_dict(torch.load("saved_models/%s/Enc_%d.pth" % (opt.exp_name, opt.epoch)))
+    decoder.load_state_dict(torch.load("saved_models/%s/Dec_%d.pth" % (opt.exp_name, opt.epoch)))
+    discriminatgor.load_state_dict(torch.load("saved_models/%s/D_%d.pth" % (opt.exp_name, opt.epoch)))
+
 
 if cuda:
     encoder.cuda()
@@ -76,8 +85,8 @@ transforms_A = transforms.Compose([
    transforms.Resize(128),
    transforms.ToTensor(),
    transforms.Normalize(
-       mean=[0.5, 0.5, 0.5],
-       std=[0.5, 0.5, 0.5]
+       mean=[0.5],
+       std=[0.5]
    )
 ])
 
@@ -98,8 +107,11 @@ def sample_image(n_row, batches_done):
     """Saves a grid of generated digits"""
     # Sample noise
     z = torch.randn(n_row ** 2, opt.latent_dim).type(Tensor)
-    gen_imgs = decoder(z)
+    decoder.eval()
+    with torch.no_grad():
+        gen_imgs = decoder(z)
     save_image(gen_imgs.data, "images/%s/%s.png" % (opt.exp_name, batches_done), nrow=n_row, normalize=True)
+    decoder.train()
 
 
 # ----------
@@ -157,3 +169,9 @@ for epoch in range(opt.n_epochs):
         batches_done = epoch * len(dataloader) + i
         if batches_done % opt.sample_interval == 0:
             sample_image(n_row=5, batches_done=batches_done)
+            
+    if opt.checkpoint_interval != -1 and epoch % opt.checkpoint_interval == 0:
+        # Save model checkpoints
+        torch.save(encoder.state_dict(), "saved_models/%s/Enc_%d.pth" % (opt.exp_name, epoch))
+        torch.save(decoder.state_dict(), "saved_models/%s/Dec_%d.pth" % (opt.exp_name, epoch))
+        torch.save(discriminator.state_dict(), "saved_models/%s/D_%d.pth" % (opt.exp_name, epoch))
